@@ -275,7 +275,7 @@ Function New-Deployment {
                 -ModuleConfigurationsPath $archetypeInstanceJson.ArchetypeOrchestration.ModuleConfigurationsPath `
                 -WorkingDirectory $defaultWorkingDirectory;
         Write-Debug "Deployment parameters contents are: $moduleConfigurationDeploymentParameters";
-
+        
         # Merge the template's parameters json file
         $moduleConfigurationDeploymentParameters = `
             Merge-Parameters `
@@ -286,19 +286,25 @@ Function New-Deployment {
 
         Write-Debug "Overridden parameters are: $moduleConfigurationDeploymentParameters";
 
-        Write-Debug "About to trigger a deployment";
-        $resourceState = `
-            Deploy-AzureResourceManagerTemplate `
-                -TenantId $subscriptionInformation.TenantId `
-                -SubscriptionId $subscriptionInformation.SubscriptionId `
-                -ResourceGroupName $moduleConfigurationResourceGroupName `
-                -DeploymentTemplate $moduleConfigurationDeploymentTemplate `
-                -DeploymentParameters $moduleConfigurationDeploymentParameters `
-                -Location $subscriptionInformation.Location `
-                -Validate:$($Validate.IsPresent);
-        Write-Debug "Deployment complete, Resource state is: $(ConvertTo-Json -Compress $resourceState)";
-        
-        if(!$Validate.IsPresent) {
+        if ($null -ne $moduleConfigurationDeploymentTemplate) {
+            Write-Debug "About to trigger a deployment";
+            $resourceState = `
+                Deploy-AzureResourceManagerTemplate `
+                    -TenantId $subscriptionInformation.TenantId `
+                    -SubscriptionId $subscriptionInformation.SubscriptionId `
+                    -ResourceGroupName $moduleConfigurationResourceGroupName `
+                    -DeploymentTemplate $moduleConfigurationDeploymentTemplate `
+                    -DeploymentParameters $moduleConfigurationDeploymentParameters `
+                    -Location $subscriptionInformation.Location `
+                    -Validate:$($Validate.IsPresent);
+            Write-Debug "Deployment complete, Resource state is: $(ConvertTo-Json -Compress $resourceState)";
+        }
+
+        $resourceState = Start-CustomScript `
+            -ModuleConfiguration $moduleConfiguration;
+
+        if(!$Validate.IsPresent -and `
+            $null -ne $resourceState) {
             # If there are deployment outputs, cache the values
             if ($null -ne $resourceState.DeploymentOutputs) {
 
@@ -397,6 +403,53 @@ Function Get-WorkingDirectory {
         Write-Host $_;
         throw $_;
     }
+}
+
+Function Start-CustomScript {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)]
+        [hashtable]
+        $ModuleConfiguration
+    )
+
+    # Execute the script only if the script object with
+    # command property is found. This is minimal configuration
+    # required to run the script.
+    if($null -ne $ModuleConfiguration.Script `
+        -and $null -ne $ModuleConfiguration.Script.Command) {
+
+            # Initialize the script prior to execution
+            $customScriptExecutor = `
+                [CustomScriptExecution]::new(
+                    $ModuleConfiguration.Script.Command, 
+                    $ModuleConfiguration.Script.Arguments
+                );
+
+            # Execute the script by calling Execute method
+            $customScriptExecutor.Execute();
+
+            # Returning the minimal resource state object
+            $resourceState += @{
+                DeploymentId = [Guid]::NewGuid()
+                DeploymentName = [Guid]::NewGuid().ToString()
+                ResourceStates = @()
+                ResourceIds = @()
+                ResourceGroupName = $null
+                DeploymentTemplate = $null
+                DeploymentParameters = $null
+                DeploymentOutputs = @{
+                    "Output" = @{ 
+                        "Value" = $customScriptExecutor.Result;
+                    }
+                }
+            }
+
+            # Return the result of script execution
+            return $resourceState;
+    }
+
+    
 }
 
 Function Get-ArchetypeInstanceName {
@@ -1474,13 +1527,13 @@ Function New-DeploymentStateInformation {
         [Parameter(Mandatory=$true)]
         [object]
         $ResourceIds,
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory=$false)]
         [string]
         $ResourceGroupName,
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory=$false)]
         [object]
         $DeploymentTemplate,
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory=$false)]
         [object]
         $DeploymentParameters,
         [Parameter(Mandatory=$false)]
