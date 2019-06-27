@@ -448,8 +448,6 @@ Function Start-CustomScript {
             # Return the result of script execution
             return $resourceState;
     }
-
-    
 }
 
 Function Get-ArchetypeInstanceName {
