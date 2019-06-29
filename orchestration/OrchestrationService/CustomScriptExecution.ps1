@@ -1,66 +1,81 @@
 Class CustomScriptExecution {
 
-    hidden $scriptType = "";
-    hidden $command = "";
-    hidden $arguments = @{};
-    
-    # Used to store results from the script execution
-    $Result = "";
-    
-    CustomScriptExecution([string] $command, [hashtable] $arguments) {
+    [string] Execute([string] $command, [hashtable] $arguments) {
+
         # Derive the script type from the command being
         # passed
-        $this.scriptType = `
+        $scriptType = `
             $this.GetScriptType($command);
-        $this.command = $command;
-        $this.arguments += $arguments;
-    }
-
-    [void] Execute() {
 
         # Branch the execution based on the type of the script being
         # passed for execution.
-        switch ($this.scriptType.ToLower()) {
-            "powershellscript" {
-                $this.Result = $this.RunPowerShellScript("script");
-            }
-            "powershellcommands" {
-                $this.Result = $this.RunPowerShellScript("command");
+        switch ($scriptType.ToLower()) {
+            "powershell" {
+                return `
+                    $this.RunPowerShellScript($command, $arguments, $scriptType);
             }
             "bash" {
-                $this.Result = $this.RunBashScript();
+                return `
+                    $this.RunBashScript($command, $arguments, $scriptType);
+            }
+            default {
+                Throw "Invalid script type. Script type not supported."
             }
         }
+
+        return $null;
     }
 
     hidden [array] GetScriptType([string] $command) {
+        
+        # This variable will hold the type and sub-type for 
+        # a script
+        $commandType = @();
+        
         $powershellScriptPattern = "^(.*?)\.ps1";
         $bashScriptPattern = "^(.*?)\.sh";
 
-        # Check if the command contains ".ps1" extension
-        # files.
+        # Check if the command passed contains ".ps1" extension
+        # files or PowerShelll Cmdlets
         if($command -match $powershellScriptPattern) {
-            return "powershellscript";
+            $type = "powershell";
+            $subType = "script";
         }
-        # Check if the command contains ".sh" extension
+        # Check if the command passed contains set of PowerShell 
+        # commands
+        elseif($this.IsPowerShellCmdletPresentInCommand($command)) {
+            $type = "powershell";
+            $subType = "command";
+        }
+        # Check if the command passed contains ".sh" extension
         # files.
         elseif($command -match $bashScriptPattern) {
-            return "bash";
+            $type = "bash";
+            $subType = "script";
         }
-        # Check if the command contains PowerShell Cmdlets
-        elseif($this.IsPowerShellCmdletPresentInCommand($command)) {
-            return "powershellcommands";
+        # Check if the command passed contains set of bash 
+        # commands
+        elseif($this.IsBashCommandPresentInCommand($command)) {
+            $type = "bash";
+            $subType = "command";
         }
-        # If none of the above conditions are met, assume
-        # the type is a set of bash commands
+        # If none of the above conditions are met, throw an exception
+        # for unsupported script type
         else {
-            return "bash";
+            Throw "Unknown script passed. Script type not supported."
         }
+
+        # Add type and subtype of the script
+        $commandType += $type;
+        $commandType += $subType;
+
+        # Returned the script type
+        return $commandType;
     }
 
     hidden [bool] IsPowerShellCmdletPresentInCommand([string] $command) {
 
-        # Get the first work from the command string to 
+        # Get the first word from the command string to 
         # determine if it's a PowerShell Script, because 
         # PowerShell scripts always start with a known Cmdlet.
         # For Example: Get-Content, ConvertFrom-Json and so on.
@@ -80,19 +95,47 @@ Class CustomScriptExecution {
         else {
             return $false;
         }
-
     }
 
-    hidden [array] AddArgumentsForExecution([string] $type) {
+    hidden [bool] IsBashCommandPresentInCommand([string] $command) {
+        # Get the first work from the command string to 
+        # determine if it's a Bash Script, because 
+        # Bash scripts always start with a known command.
+        # For Example: sh, echo and so on.
+        $cmdlet = ($command -split ' ')[0];
+
+        # Does the command exists?
+        $outputFromCommandCheck = `
+            bash -c "command -v $cmdlet";
+
+        # If the command is a valid bash command, then a 
+        # return value is expected. If not, no return value
+        # is expected.
+        if($null -ne $outputFromCommandCheck) {
+            return $true;
+        }
+        else {
+            return $false;
+        }
+    }
+
+    hidden [array] AddArgumentsForExecution([string] $command, 
+                                            [string] $type, 
+                                            [hashtable] $arguments
+                                            ){
 
         # Get arguments for the script execution
-        if($type -eq "powershellscript") {
+        if($type -eq "powershell") {
+            # If type is powershell, we need the command to order the arguments
+            # in the right order
             return `
-                $this.GetArgumentsForPowerShellScript();
+                $this.GetArgumentsForPowerShellScript($command, $arguments);
         }
         elseif($type -eq "bash") {
+            # If type is bash, we pass the arguments in the same order passed.
+            # So we do not need the command to be passed.
             return `
-                $this.GetArgumentsForBashScript();
+                $this.GetArgumentsForBashScript($arguments);
         }
         else {
             # Return null if the type is not PowerShell script
@@ -101,7 +144,7 @@ Class CustomScriptExecution {
         }
     }
 
-    hidden [array] GetArgumentsForBashScript() {
+    hidden [array] GetArgumentsForBashScript([hashtable] $arguments) {
 
         # Variable to hold the list of arguments to be
         # passed to the bash script execution
@@ -111,16 +154,16 @@ Class CustomScriptExecution {
         # there is no way to verify the order in bash.
         # We are only converting the hashtable to an 
         # array
-        $this.arguments.Keys | ForEach-Object {
+        $arguments.Keys | ForEach-Object {
             $argumentName = $_;
-            $orderedArguments += $this.arguments[$argumentName];
+            $orderedArguments += $arguments[$argumentName];
         }
 
         # Return the arguments list
         return $orderedArguments;
     }
 
-    hidden [array] GetArgumentsForPowerShellScript() {
+    hidden [array] GetArgumentsForPowerShellScript([string] $command, [hashtable] $arguments) {
 
         # List of system parameters we can pass to a 
         # PowerShell script by default
@@ -145,17 +188,19 @@ Class CustomScriptExecution {
 
         # Iterate through the list of Parameters accepted by
         # a script to rearrange the in argument in the right order.
-        (Get-Command $this.command).Parameters.Keys | ForEach-Object {
+        (Get-Command $command -ErrorAction SilentlyContinue).Parameters.Keys | ForEach-Object {
             $parameterName = $_;
 
             # Add the argument to a new array in the right order if
             # it is passed from the orchestation. Otherwise, add a 
             # null in its place
-            if($this.arguments.ContainsKey($parameterName) `
+            if($null -ne $parameterName `
+                -and $arguments.ContainsKey($parameterName) `
                 -and $parameterName -notin $systemParameters) {
-                $orderedArguments += $this.arguments[$parameterName];
+                $orderedArguments += $arguments[$parameterName];
             }
-            elseif($parameterName -notin $systemParameters) {
+            elseif($null -ne $parameterName `
+                -and $parameterName -notin $systemParameters) {
                 $orderedArguments += $null;
             }
         }
@@ -164,42 +209,47 @@ Class CustomScriptExecution {
         return $orderedArguments;
     }
 
-    hidden [string] RunPowerShellScript([string] $type) {
+    hidden [string] RunPowerShellScript([string] $command, [hashtable] $arguments, [array] $scriptType) {
 
-        # Branch based on the type of PowerShell to
-        # run (i.e script or set of commands)
-        if($type -eq "script") {
+        if($scriptType[1].ToLower() -eq "script") {
 
             # Get arguments to execute the PowerShell script
             $argumentsList = `
-                $this.AddArgumentsForExecution($this.scriptType);
+                $this.AddArgumentsForExecution(
+                    $command, 
+                    $scriptType[0].ToLower(), 
+                    $arguments);
 
             # Pass the script file path and argumentsList to
             # execute the script
             return `
-                $this.RunJob($null, $this.command, $argumentsList);
+                $this.RunJob($null, $command, $argumentsList);
         }
         else {
 
-            # Pass the PowerShell commands to execute
+            # Pass the set of commands to execute the script
             return `
-                $this.RunJob($this.command, $null, $null);
+                $this.RunJob($command, $null, $null);
         }
+        
     }
 
-    hidden [string] RunBashScript() {
+    hidden [string] RunBashScript([string] $command, [hashtable] $arguments, [array] $scriptType) {
 
         # Get arguments to execute the bash script
         $argumentsList = `
-            $this.AddArgumentsForExecution($this.scriptType);
+            $this.AddArgumentsForExecution(
+                $command, 
+                $scriptType[0].ToLower(), 
+                $arguments);
 
         # Append the arguments to the end of the bash script
-        $this.command = `
-            ("bash -c '{0} {1}'" -F $this.command, [string]$argumentsList);
+        $command = `
+            ("bash -c '{0} {1}'" -F $command, [string]$argumentsList);
         
         # Return the formatted command
         return `
-            $this.RunJob($this.command, $null, $null);
+            $this.RunJob($command, $null, $null);
     }
 
     hidden [string] RunJob([string] $command, [string] $filePath, [array] $argumentsList) {
@@ -210,7 +260,10 @@ Class CustomScriptExecution {
         try {
             $job = $null;
 
-            # Job is a set of commands to be executed
+            # Job is a set of commands to be executed. ScriptBlock
+            # allows to run a set of commands. ScriptBlock does not
+            # run .ps1 files. We use this method to run a set of 
+            # PowerShell Cmdlets or bash commands.
             if(![string]::IsNullOrEmpty($command)) {
 
                 $job = Start-Job -ScriptBlock {
@@ -219,7 +272,10 @@ Class CustomScriptExecution {
                     . $script;
                 } -ArgumentList $command
             }
-            # Job is a script file to be executed
+            # Job is a script file to be executed. FilePath is used
+            # to run a PowerShell script and pass arguments. PowerShell
+            # scripts can only be invoked through  FilePath argument to
+            # Start-Job. 
             elseif(![string]::IsNullOrEmpty($filePath)) {
                 $job = `
                     Start-Job `
@@ -231,23 +287,30 @@ Class CustomScriptExecution {
             if ($null -ne $job) {
 
                 # Wait for the job to complete
-                While($job.JobStateInfo.State -ne "Completed" ) {
+                While($job.JobStateInfo.State -notin @("Completed","Failed","Blocked")) {
                     $job = Get-Job -Name $job.Name;
                     Write-Debug "Waiting for Script to finish ... ";
                     Start-Sleep -s 6;
                 }
-                
-                # Child job contains the output from running the commands
-                # or script file. It is always only one child job in our 
-                # case since we start only one job.
-                (Get-Job -Name $job.Name).ChildJobs | ForEach-Object {
-                    $resultant = $_.Output[$_.Output.Count-1].ToString();
-                };
+
+                if($job.JobStateInfo.State -eq "Completed") {                
+                    # Child job contains the output from running the commands
+                    # or script file. It is always only one child job in our 
+                    # case since we start only one job.
+                    (Get-Job -Name $job.Name).ChildJobs | ForEach-Object {
+                        $resultant = $_.Output[$_.Output.Count-1].ToString();
+                    };
+                }
+                else {
+                    # Script failed to execute, throw an exception
+                    Throw "Script failed to execute";
+                }
             }
         }
         catch {
             Write-Error "An exception occurred when running the script."
             Write-Error $_;
+            Throw "A runtime exception was thrown while running the script."
         }
 
         # Return the latest output

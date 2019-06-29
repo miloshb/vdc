@@ -421,13 +421,13 @@ Function Start-CustomScript {
 
             # Initialize the script prior to execution
             $customScriptExecutor = `
-                [CustomScriptExecution]::new(
-                    $ModuleConfiguration.Script.Command, 
-                    $ModuleConfiguration.Script.Arguments
-                );
+                [CustomScriptExecution]::new();
 
             # Execute the script by calling Execute method
-            $customScriptExecutor.Execute();
+            $customScriptExecutor.Execute(
+                $ModuleConfiguration.Script.Command, 
+                $ModuleConfiguration.Script.Arguments
+                );
 
             # Returning the minimal resource state object
             $resourceState += @{

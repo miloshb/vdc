@@ -1,11 +1,16 @@
 [CmdletBinding()]
 Param (
-    [Parameter(Mandatory=$true)]
+    [Parameter(Mandatory=$false)]
     [string] $FirstParameter,
-    [Parameter(Mandatory=$true)]
+    [Parameter(Mandatory=$false)]
     [string] $SecondParameter,
-    [Parameter(Mandatory=$true)]
+    [Parameter(Mandatory=$false)]
     [string] $ThirdParameter
 )
 
-Write-Output "$SecondParameter";
+if(![string]::IsNullOrEmpty($SecondParameter)) {
+    Write-Output "$SecondParameter";
+}
+else {
+    Write-Output "pwsh";
+}
