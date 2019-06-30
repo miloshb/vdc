@@ -424,7 +424,7 @@ Function Start-CustomScript {
                 [CustomScriptExecution]::new();
 
             # Execute the script by calling Execute method
-            $customScriptExecutor.Execute(
+            $scriptOutput = $customScriptExecutor.Execute(
                 $ModuleConfiguration.Script.Command, 
                 $ModuleConfiguration.Script.Arguments
                 );
@@ -440,7 +440,7 @@ Function Start-CustomScript {
                 DeploymentParameters = $null
                 DeploymentOutputs = @{
                     "Output" = @{ 
-                        "Value" = $customScriptExecutor.Result;
+                        "Value" = $scriptOutput;
                     }
                 }
             }
