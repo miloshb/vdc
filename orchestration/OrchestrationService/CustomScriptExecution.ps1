@@ -49,15 +49,10 @@ Class CustomScriptExecution {
         }
         # Check if the command passed contains ".sh" extension
         # files.
-        elseif($command -match $bashScriptPattern) {
+        elseif($command -match $bashScriptPattern `
+            -or $this.IsBashCommandPresentInCommand($command)) {
             $type = "bash";
-            $subType = "script";
-        }
-        # Check if the command passed contains set of bash 
-        # commands
-        elseif($this.IsBashCommandPresentInCommand($command)) {
-            $type = "bash";
-            $subType = "command";
+            $subType = "";
         }
         # If none of the above conditions are met, throw an exception
         # for unsupported script type
@@ -117,6 +112,49 @@ Class CustomScriptExecution {
         else {
             return $false;
         }
+    }
+
+    hidden [string] RunPowerShellScript([string] $command, [hashtable] $arguments, [array] $scriptType) {
+
+        if($scriptType[1].ToLower() -eq "script") {
+
+            # Get arguments to execute the PowerShell script
+            $argumentsList = `
+                $this.AddArgumentsForExecution(
+                    $command, 
+                    $scriptType[0].ToLower(), 
+                    $arguments);
+
+            # Pass the script file path and argumentsList to
+            # execute the script
+            return `
+                $this.RunJob($null, $command, $argumentsList);
+        }
+        else {
+
+            # Pass the set of commands to execute the script
+            return `
+                $this.RunJob($command, $null, $null);
+        }
+        
+    }
+
+    hidden [string] RunBashScript([string] $command, [hashtable] $arguments, [array] $scriptType) {
+
+        # Get arguments to execute the bash script
+        $argumentsList = `
+            $this.AddArgumentsForExecution(
+                $command, 
+                $scriptType[0].ToLower(), 
+                $arguments);
+
+        # Append the arguments to the end of the bash script
+        $command = `
+            ("bash -c '{0} {1}'" -F $command, [string]$argumentsList);
+        
+        # Return the formatted command
+        return `
+            $this.RunJob($command, $null, $null);
     }
 
     hidden [array] AddArgumentsForExecution([string] $command, 
@@ -209,68 +247,26 @@ Class CustomScriptExecution {
         return $orderedArguments;
     }
 
-    hidden [string] RunPowerShellScript([string] $command, [hashtable] $arguments, [array] $scriptType) {
-
-        if($scriptType[1].ToLower() -eq "script") {
-
-            # Get arguments to execute the PowerShell script
-            $argumentsList = `
-                $this.AddArgumentsForExecution(
-                    $command, 
-                    $scriptType[0].ToLower(), 
-                    $arguments);
-
-            # Pass the script file path and argumentsList to
-            # execute the script
-            return `
-                $this.RunJob($null, $command, $argumentsList);
-        }
-        else {
-
-            # Pass the set of commands to execute the script
-            return `
-                $this.RunJob($command, $null, $null);
-        }
-        
-    }
-
-    hidden [string] RunBashScript([string] $command, [hashtable] $arguments, [array] $scriptType) {
-
-        # Get arguments to execute the bash script
-        $argumentsList = `
-            $this.AddArgumentsForExecution(
-                $command, 
-                $scriptType[0].ToLower(), 
-                $arguments);
-
-        # Append the arguments to the end of the bash script
-        $command = `
-            ("bash -c '{0} {1}'" -F $command, [string]$argumentsList);
-        
-        # Return the formatted command
-        return `
-            $this.RunJob($command, $null, $null);
-    }
-
     hidden [string] RunJob([string] $command, [string] $filePath, [array] $argumentsList) {
         
         # Variable to store the output from running a script
-        $resultant = "";
+        $result = "";
 
         try {
             $job = $null;
-
             # Job is a set of commands to be executed. ScriptBlock
             # allows to run a set of commands. ScriptBlock does not
             # run .ps1 files. We use this method to run a set of 
             # PowerShell Cmdlets or bash commands.
             if(![string]::IsNullOrEmpty($command)) {
-
+                # Case 1 - Cannot use the Invoke-Comaand because of erroraction not honored
+                # Case 2 - Parameters cannot be dynamically passed to be able to call ConvertFrom-Json
+                # (for example). We do not support Cmdlet as part of ScriptBlock along with ArgumentsList
                 $job = Start-Job -ScriptBlock {
-                    param($command)
-                    $script = [scriptblock]::Create($command);
+                    param($scriptCommand)
+                    $script = [scriptblock]::Create($scriptCommand);
                     . $script;
-                } -ArgumentList $command
+                } -ArgumentList $command;
             }
             # Job is a script file to be executed. FilePath is used
             # to run a PowerShell script and pass arguments. PowerShell
@@ -290,7 +286,7 @@ Class CustomScriptExecution {
                 While($job.JobStateInfo.State -notin @("Completed","Failed","Blocked")) {
                     $job = Get-Job -Name $job.Name;
                     Write-Debug "Waiting for Script to finish ... ";
-                    Start-Sleep -s 6;
+                    Start-Sleep -s 1;
                 }
 
                 if($job.JobStateInfo.State -eq "Completed") {                
@@ -298,7 +294,7 @@ Class CustomScriptExecution {
                     # or script file. It is always only one child job in our 
                     # case since we start only one job.
                     (Get-Job -Name $job.Name).ChildJobs | ForEach-Object {
-                        $resultant = $_.Output[$_.Output.Count-1].ToString();
+                        $result = $_.Output[$_.Output.Count-1].ToString();
                     };
                 }
                 else {
@@ -306,15 +302,14 @@ Class CustomScriptExecution {
                     Throw "Script failed to execute";
                 }
             }
+            # Return the latest output
+            return $result;
         }
         catch {
             Write-Error "An exception occurred when running the script."
             Write-Error $_;
             Throw "A runtime exception was thrown while running the script."
         }
-
-        # Return the latest output
-        return $resultant;
     }
 
 }

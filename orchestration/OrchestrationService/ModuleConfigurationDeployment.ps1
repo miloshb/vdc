@@ -32,6 +32,7 @@ $cacheDataService = $null;
 $auditDataService = $null;
 $moduleStateDataService = $null;
 $configurationBuilder = $null;
+$customScriptExecutor = $null
 $factory = $null;
 $defaultLocation = "West US";
 $defaultSupportedVersion = 2.0;
@@ -90,8 +91,8 @@ Function New-Deployment {
         $moduleStateDataService = `
             $factory.GetInstance('IModuleStateDataService');
 
-        $configurationBuilder = `
-            $factory.GetInstance('ConfigurationBuilder');
+        $customScriptExecutor = `
+            $factory.GetInstance('CustomScriptExecutor');
         
         # Contruct the archetype instance object only if it is not already
         # cached
@@ -419,16 +420,13 @@ Function Start-CustomScript {
     if($null -ne $ModuleConfiguration.Script `
         -and $null -ne $ModuleConfiguration.Script.Command) {
 
-            # Initialize the script prior to execution
-            $customScriptExecutor = `
-                [CustomScriptExecution]::new();
-
             # Execute the script by calling Execute method
             $scriptOutput = $customScriptExecutor.Execute(
                 $ModuleConfiguration.Script.Command, 
                 $ModuleConfiguration.Script.Arguments
                 );
 
+            # TODO: support sub-property retrieval for outputs
             # Returning the minimal resource state object
             $resourceState += @{
                 DeploymentId = [Guid]::NewGuid()
@@ -438,6 +436,7 @@ Function Start-CustomScript {
                 ResourceGroupName = $null
                 DeploymentTemplate = $null
                 DeploymentParameters = $null
+                Type="CustomScript"
                 DeploymentOutputs = @{
                     "Output" = @{ 
                         "Value" = $scriptOutput;
