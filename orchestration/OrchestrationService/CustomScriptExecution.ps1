@@ -294,7 +294,13 @@ Class CustomScriptExecution {
                     # or script file. It is always only one child job in our 
                     # case since we start only one job.
                     (Get-Job -Name $job.Name).ChildJobs | ForEach-Object {
-                        $result = $_.Output[$_.Output.Count-1].ToString();
+                        # Set the result only if there is an output
+                        if($_.Output.Count -ge 1) {
+                            $result = $_.Output[$_.Output.Count-1].ToString();
+                        }
+                        else {
+                            $result = "";
+                        }
                     };
                 }
                 else {
