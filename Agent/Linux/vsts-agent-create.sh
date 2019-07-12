@@ -3,7 +3,7 @@
 AZDO_URL=$1
 PAT=$2
 VSTS_POOL=$3
-AGENT_NAME="vsts-ubuntu-agent"
+AGENT_NAME=$4
 
 CLOUD_INIT='#cloud-config
 runcmd:
@@ -21,10 +21,15 @@ CLOUD_INIT=${CLOUD_INIT/PAT/$PAT}
 CLOUD_INIT=${CLOUD_INIT/VSTS_POOL/$VSTS_POOL}
 CLOUD_INIT=${CLOUD_INIT/AGENT_NAME/$AGENT_NAME}
 
+RESOURCE_GROUP_NAME='vdc-azuredevops-agents-rg'
+NSG_NAME=$AGENT_NAME'NSG'
+
+echo "Creating VM Agent from Image ..."
 az vm create \
-  --resource-group vsts-agent-rg \
+  --resource-group $RESOURCE_GROUP_NAME \
   --location westus \
   --name $AGENT_NAME \
+  --public-ip-address "" \
   --vnet-name ubuntu-agent-rg-vnet \
   --subnet default \
   --image ubuntu-self-hosted-agent \
@@ -32,3 +37,27 @@ az vm create \
   --admin-username azureuser \
   --generate-ssh-keys \
   --verbose
+
+echo "Removing default ssh access NSG rule"
+az network nsg rule delete \
+  --resource-group $RESOURCE_GROUP_NAME \
+  --nsg-name $NSG_NAME \
+  --name 'default-allow-ssh'
+
+echo "Adding NSG rule to deny ssh access from all sources.
+You can modify this later for your specific IP. Look for NSG
+rule by name 'ssh'.
+"
+az network nsg rule create \
+  --resource-group $RESOURCE_GROUP_NAME \
+  --nsg-name $NSG_NAME \
+  --name 'ssh' \
+  --access Deny \
+  --direction Inbound \
+  --priority 900 \
+  --source-address-prefixes "*" \
+  --source-port-ranges "*" \
+  --destination-address-prefixes "*" \
+  --destination-port-ranges "*"
+  
+  az logout

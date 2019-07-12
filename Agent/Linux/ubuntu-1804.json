@@ -7,8 +7,9 @@
         "image_name": "{{env `IMAGE_NAME`}}",
         "resource_group": "{{env `ARM_RESOURCE_GROUP`}}",
         "location": "{{env `ARM_RESOURCE_LOCATION`}}",
-        "agent_folder": "/agent",
-        "vm_size": "Standard_DS2_v2"
+        "vm_size": "{{env `VM_SIZE`}}",
+        "vm_os_disk_size_gb": "{{ env `OS_DISK_SIZE` }}",
+        "agent_folder": "/agent"
     },
     "builders": [
         {
@@ -33,7 +34,7 @@
 
             "location": "{{user `location`}}",
             "vm_size": "{{user `vm_size`}}",
-            "os_disk_size_gb": "30"
+            "os_disk_size_gb": "{{user `vm_os_disk_size_gb`}}"
         }
     ],
     "provisioners": [
